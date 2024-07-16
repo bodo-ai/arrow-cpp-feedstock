@@ -48,6 +48,12 @@ fi
 # reusable variable for dependencies we cannot yet unvendor
 export READ_RECIPE_META_YAML_WHY_NOT=OFF
 
+# Enable SCCache
+export SCCACHE_BUCKET=engine-codebuild-cache
+export SCCACHE_REGION=us-east-2
+export SCCACHE_S3_USE_SSL=true
+export SCCACHE_S3_SERVER_SIDE_ENCRYPTION=true
+
 # for available switches see
 # https://github.com/apache/arrow/blame/apache-arrow-12.0.0/cpp/cmake_modules/DefineOptions.cmake
 # placeholder in ARROW_GDB_INSTALL_DIR must match _la_placeholder in activate.sh
@@ -85,6 +91,7 @@ cmake -GNinja \
     -DARROW_SUBSTRAIT=ON \
     -DARROW_USE_GLOG=ON \
     -DARROW_USE_LD_GOLD=ON \
+    -DARROW_USE_SCCACHE=ON \
     -DARROW_WITH_BROTLI=ON \
     -DARROW_WITH_BZ2=ON \
     -DARROW_WITH_LZ4=ON \
