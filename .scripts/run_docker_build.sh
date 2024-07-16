@@ -86,6 +86,7 @@ docker pull "${DOCKER_IMAGE}"
 docker run ${DOCKER_RUN_ARGS} \
            -v "${RECIPE_ROOT}":/home/conda/recipe_root:rw,z,delegated \
            -v "${FEEDSTOCK_ROOT}":/home/conda/feedstock_root:rw,z,delegated \
+           -v "${SECRETS_DIR}":/home/secrets:rw,z,delegated \
            -e CONFIG \
            -e HOST_USER_ID \
            -e UPLOAD_PACKAGES \
@@ -103,6 +104,8 @@ docker run ${DOCKER_RUN_ARGS} \
            -e BINSTAR_TOKEN \
            -e FEEDSTOCK_TOKEN \
            -e STAGING_BINSTAR_TOKEN \
+           -e AWS_ACCESS_KEY_ID \
+           -e AWS_SECRET_ACCESS_KEY \
            "${DOCKER_IMAGE}" \
            bash \
            "/home/conda/feedstock_root/${PROVIDER_DIR}/build_steps.sh"

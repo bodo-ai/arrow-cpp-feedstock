@@ -21,6 +21,8 @@ source:
       - patches/0001-C-CMake-correctly-use-Protobuf_PROTOC_EXECUTABLE.patch
       # backport https://github.com/apache/arrow/pull/41767
       - patches/0002-GH-41755-C-ORC-Ensure-setting-detected-ORC-version-4.patch
+      # Bodo-specific Changes
+      - patches/0003-Bodo-Changes.patch
   # testing-submodule not part of release tarball
   - git_url: https://github.com/apache/arrow-testing.git
     git_rev: 25d16511e8d42c2744a1d94d90169e3a36e92631
@@ -32,6 +34,10 @@ build:
   # all later versions, since arrow is only using libcuda, and not libcudart.
   skip: true  # [cuda_compiler_version not in ("None", cuda_compiler_version_min)]
   # arrow promises API- & ABI-compatibility along SemVer, see #1096
+  script_env:
+  # Necessary for sccache to find AWS
+  - AWS_ACCESS_KEY_ID
+  - AWS_SECRET_ACCESS_KEY
 
 requirements:
   build:
@@ -51,6 +57,8 @@ requirements:
     # necessary for vendored jemalloc
     - autoconf     # [linux]
     - make         # [linux]
+    - sccache
+
   host:
     # for required dependencies, see
     # https://github.com/apache/arrow/blob/apache-arrow-11.0.0/cpp/cmake_modules/ThirdpartyToolchain.cmake#L46-L75
