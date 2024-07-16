@@ -24,6 +24,8 @@ source:
       - patches/0002-skip-NonExistentBucket-test-on-osx.patch
       # for correctly including xsimd headers
       - patches/0003-Change-xsimd-inclusion-criterion.patch
+      # Bodo-specific Changes
+      - patches/0004-Bodo-Changes.patch
 
   # testing-submodules not part of release tarball
   - git_url: https://github.com/apache/arrow-testing.git
@@ -38,6 +40,11 @@ build:
   # for cuda support, building with one version is enough to be compatible with
   # all later versions, since arrow is only using libcuda, and not libcudart.
   skip: true  # [cuda_compiler_version not in ("None", cuda_compiler_version_min)]
+  # arrow promises API- & ABI-compatibility along SemVer, see #1096
+  script_env:
+  # Necessary for sccache to find AWS
+  - AWS_ACCESS_KEY_ID
+  - AWS_SECRET_ACCESS_KEY
 
 requirements:
   build:
@@ -59,6 +66,7 @@ requirements:
     - make         # [unix]
     # where orc ends up looking (because during build, CONDA_PREFIX==BUILD_PREFIX)
     - tzdata
+    - sccache
   host:
     # for required dependencies, see
     # https://github.com/apache/arrow/blob/apache-arrow-11.0.0/cpp/cmake_modules/ThirdpartyToolchain.cmake#L46-L75
