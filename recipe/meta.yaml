@@ -22,7 +22,8 @@ source:
       # upstream problems on with s3 tests on osx, see
       # https://github.com/apache/arrow/issues/35587
       - patches/0002-skip-NonExistentBucket-test-on-osx.patch
-
+      # Bodo-specific Changes
+      - patches/0004-Bodo-Changes.patch
   # testing-submodules not part of release tarball
   - git_url: https://github.com/apache/arrow-testing.git
     git_rev: fbf6b703dc93d17d75fa3664c5aa2c7873ebaf06
@@ -36,6 +37,11 @@ build:
   # for cuda support, building with one version is enough to be compatible with
   # all later versions, since arrow is only using libcuda, and not libcudart.
   skip: true  # [cuda_compiler_version not in ("None", cuda_compiler_version_min)]
+  # arrow promises API- & ABI-compatibility along SemVer, see #1096
+  script_env:
+  # Necessary for sccache to find AWS
+  - AWS_ACCESS_KEY_ID
+  - AWS_SECRET_ACCESS_KEY
 
 requirements:
   build:
@@ -57,6 +63,7 @@ requirements:
     - make         # [unix]
     # where orc ends up looking (because during build, CONDA_PREFIX==BUILD_PREFIX)
     - tzdata
+    - sccache
   host:
     # for required dependencies, see
     # https://github.com/apache/arrow/blob/apache-arrow-11.0.0/cpp/cmake_modules/ThirdpartyToolchain.cmake#L46-L75
