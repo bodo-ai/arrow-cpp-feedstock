@@ -13,6 +13,7 @@ for package in `ls ${FEEDSTOCK_ROOT}/build_artifacts/linux-64/*.conda`; do
     echo "Package Name: $package_name"
 
     curl -u${USERNAME}:${TOKEN} -T $package "https://bodo.jfrog.io/artifactory/${CHANNEL_NAME}/linux-64/$package_name"
+    anaconda -t $ANACONDA_TOKEN upload -u bodo.ai -c bodo.ai $package --label main --force
 done
 curl -X POST https://$USERNAME:$TOKEN@bodo.jfrog.io/artifactory/api/conda/$CHANNEL_NAME/reindex
 
