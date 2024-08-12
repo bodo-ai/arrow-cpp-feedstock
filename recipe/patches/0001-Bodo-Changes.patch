@@ -1,8 +1,24 @@
 diff --git a/cpp/src/arrow/dataset/file_parquet.cc b/cpp/src/arrow/dataset/file_parquet.cc
-index c17ba89be7..15bde86ba4 100644
+index 1f8b6cc488..5ad7a5f78b 100644
 --- a/cpp/src/arrow/dataset/file_parquet.cc
 +++ b/cpp/src/arrow/dataset/file_parquet.cc
-@@ -36,6 +36,7 @@
+@@ -26,16 +26,23 @@
+ 
+ #include "arrow/compute/cast.h"
+ #include "arrow/compute/exec.h"
++#include "arrow/dataset/dataset.h"
+ #include "arrow/dataset/dataset_internal.h"
+ #include "arrow/dataset/parquet_encryption_config.h"
+ #include "arrow/dataset/scanner.h"
+ #include "arrow/filesystem/path_util.h"
++#include "arrow/memory_pool.h"
++#include "arrow/record_batch.h"
++#include "arrow/result.h"
+ #include "arrow/table.h"
++#include "arrow/type.h"
++#include "arrow/type_fwd.h"
+ #include "arrow/util/checked_cast.h"
+ #include "arrow/util/future.h"
  #include "arrow/util/iterator.h"
  #include "arrow/util/logging.h"
  #include "arrow/util/range.h"
@@ -10,7 +26,78 @@ index c17ba89be7..15bde86ba4 100644
  #include "arrow/util/tracing_internal.h"
  #include "parquet/arrow/reader.h"
  #include "parquet/arrow/schema.h"
-@@ -630,10 +631,15 @@ Result<RecordBatchGenerator> ParquetFileFormat::ScanBatchesAsync(
+@@ -555,6 +562,60 @@ Future<std::shared_ptr<parquet::arrow::FileReader>> ParquetFileFormat::GetReader
+       });
+ }
+ 
++struct CastingGenerator {
++  CastingGenerator(RecordBatchGenerator source, std::shared_ptr<Schema> final_schema,
++                   arrow::MemoryPool* pool = arrow::default_memory_pool())
++      : source_(source),
++        final_schema_(final_schema),
++        exec_ctx(std::make_shared<compute::ExecContext>(pool)) {}
++
++  Future<std::shared_ptr<RecordBatch>> operator()() {
++    return this->source_().Then(
++        [this](const std::shared_ptr<RecordBatch>& next) -> std::shared_ptr<RecordBatch> {
++          if (IsIterationEnd(next)) {
++            return next;
++          }
++          std::vector<std::shared_ptr<::arrow::Array>> out_cols;
++          std::vector<std::shared_ptr<arrow::Field>> out_schema_fields;
++
++          bool changed = false;
++          for (const auto& field : this->final_schema_->fields()) {
++            FieldRef field_ref = FieldRef(field->name());
++            auto column_st = field_ref.GetOneOrNone(*next);
++            std::shared_ptr<Array> column = column_st.ValueUnsafe();
++            if (column) {
++              if (!column->type()->Equals(field->type())) {
++                // Referenced field was present but didn't have the expected type.
++                auto converted_st =
++                    compute::Cast(column, field->type(), compute::CastOptions::Safe(),
++                                  this->exec_ctx.get());
++                auto converted = std::move(converted_st.ValueUnsafe());
++                column = converted.make_array();
++                changed = true;
++              }
++              out_cols.emplace_back(std::move(column));
++              out_schema_fields.emplace_back(field->Copy());
++              // XXX Do we need to handle the else case? What happens when the column
++              // doesn't exist, e.g. all null or all the same value?
++            }
++          }
++
++          if (changed) {
++            return RecordBatch::Make(
++                std::make_shared<Schema>(std::move(out_schema_fields),
++                                         next->schema()->metadata()),
++                next->num_rows(), std::move(out_cols));
++          } else {
++            return next;
++          }
++        });
++  }
++
++  RecordBatchGenerator source_;
++  std::shared_ptr<Schema> final_schema_;
++  std::shared_ptr<compute::ExecContext> exec_ctx;
++};
++
+ struct SlicingGenerator {
+   SlicingGenerator(RecordBatchGenerator source, int64_t batch_size)
+       : state(std::make_shared<State>(source, batch_size)) {}
+@@ -617,6 +678,9 @@ Result<RecordBatchGenerator> ParquetFileFormat::ScanBatchesAsync(
+       [this, options, parquet_fragment, pre_filtered,
+        row_groups](const std::shared_ptr<parquet::arrow::FileReader>& reader) mutable
+       -> Result<RecordBatchGenerator> {
++    // Since we already do the batching through the SlicingGenerator, we don't need the
++    // reader to batch its output.
++    reader->set_batch_size(std::numeric_limits<int64_t>::max());
+     // Ensure that parquet_fragment has FileMetaData
+     RETURN_NOT_OK(parquet_fragment->EnsureCompleteMetadata(reader.get()));
+     if (!pre_filtered) {
+@@ -633,10 +697,17 @@ Result<RecordBatchGenerator> ParquetFileFormat::ScanBatchesAsync(
              kParquetTypeName, options.get(), default_fragment_scan_options));
      int batch_readahead = options->batch_readahead;
      int64_t rows_to_readahead = batch_readahead * options->batch_size;
@@ -27,30 +114,16 @@ index c17ba89be7..15bde86ba4 100644
 +    ARROW_ASSIGN_OR_RAISE(auto generator, reader->GetRecordBatchGenerator(
 +                                              reader, row_groups, column_projection,
 +                                              cpu_executor, rows_to_readahead));
++    generator =
++        CastingGenerator(std::move(generator), options->dataset_schema, options->pool);
      RecordBatchGenerator sliced =
          SlicingGenerator(std::move(generator), options->batch_size);
      if (batch_readahead == 0) {
 diff --git a/cpp/src/arrow/dataset/scanner.cc b/cpp/src/arrow/dataset/scanner.cc
-index 18981d1451..cdf5f586b4 100644
+index a856a792a2..5c10dfc6ac 100644
 --- a/cpp/src/arrow/dataset/scanner.cc
 +++ b/cpp/src/arrow/dataset/scanner.cc
-@@ -302,6 +302,7 @@ Result<EnumeratedRecordBatchGenerator> FragmentToBatches(
-                  {"arrow.dataset.fragment.type_name", fragment.value->type_name()},
-              });
- #endif
-+  // This is the call site.
-   ARROW_ASSIGN_OR_RAISE(auto batch_gen, fragment.value->ScanBatchesAsync(options));
-   ArrayVector columns;
-   for (const auto& field : options->dataset_schema->fields()) {
-@@ -327,6 +328,7 @@ Result<EnumeratedRecordBatchGenerator> FragmentToBatches(
- Result<AsyncGenerator<EnumeratedRecordBatchGenerator>> FragmentsToBatches(
-     FragmentGenerator fragment_gen, const std::shared_ptr<ScanOptions>& options) {
-   auto enumerated_fragment_gen = MakeEnumeratedGenerator(std::move(fragment_gen));
-+  // This is the call-site.
-   auto batch_gen_gen =
-       MakeMappedGenerator(std::move(enumerated_fragment_gen),
-                           [=](const Enumerated<std::shared_ptr<Fragment>>& fragment) {
-@@ -353,8 +355,10 @@ class OneShotFragment : public Fragment {
+@@ -355,8 +355,10 @@ class OneShotFragment : public Fragment {
      ARROW_ASSIGN_OR_RAISE(
          auto background_gen,
          MakeBackgroundGenerator(std::move(batch_it_), options->io_context.executor()));
@@ -63,7 +136,7 @@ index 18981d1451..cdf5f586b4 100644
    }
    std::string type_name() const override { return "one-shot"; }
  
-@@ -380,7 +384,7 @@ Result<TaggedRecordBatchIterator> AsyncScanner::ScanBatches() {
+@@ -382,7 +384,7 @@ Result<TaggedRecordBatchIterator> AsyncScanner::ScanBatches() {
        [this](::arrow::internal::Executor* executor) {
          return ScanBatchesAsync(executor);
        },
@@ -72,7 +145,7 @@ index 18981d1451..cdf5f586b4 100644
  }
  
  Result<EnumeratedRecordBatchIterator> AsyncScanner::ScanBatchesUnordered() {
-@@ -388,7 +392,7 @@ Result<EnumeratedRecordBatchIterator> AsyncScanner::ScanBatchesUnordered() {
+@@ -390,7 +392,7 @@ Result<EnumeratedRecordBatchIterator> AsyncScanner::ScanBatchesUnordered() {
        [this](::arrow::internal::Executor* executor) {
          return ScanBatchesUnorderedAsync(executor);
        },
@@ -81,7 +154,7 @@ index 18981d1451..cdf5f586b4 100644
  }
  
  Result<std::shared_ptr<Table>> AsyncScanner::ToTable() {
-@@ -398,7 +402,7 @@ Result<std::shared_ptr<Table>> AsyncScanner::ToTable() {
+@@ -400,7 +402,7 @@ Result<std::shared_ptr<Table>> AsyncScanner::ToTable() {
  }
  
  Result<EnumeratedRecordBatchGenerator> AsyncScanner::ScanBatchesUnorderedAsync() {
@@ -90,15 +163,7 @@ index 18981d1451..cdf5f586b4 100644
                                     /*sequence_fragments=*/false);
  }
  
-@@ -443,6 +447,7 @@ Result<EnumeratedRecordBatchGenerator> AsyncScanner::ScanBatchesUnorderedAsync(
-                    scan_options_->projection.call()->options.get())
-                    ->field_names;
- 
-+  // This is where the node is added to the plan.
-   RETURN_NOT_OK(
-       acero::Declaration::Sequence(
-           {
-@@ -599,11 +604,12 @@ Result<std::shared_ptr<Table>> AsyncScanner::Head(int64_t num_rows) {
+@@ -601,7 +603,7 @@ Result<std::shared_ptr<Table>> AsyncScanner::Head(int64_t num_rows) {
  }
  
  Result<TaggedRecordBatchGenerator> AsyncScanner::ScanBatchesAsync() {
@@ -107,12 +172,7 @@ index 18981d1451..cdf5f586b4 100644
  }
  
  Result<TaggedRecordBatchGenerator> AsyncScanner::ScanBatchesAsync(
-     Executor* cpu_executor) {
-+  // Is this part of the code path?
-   ARROW_ASSIGN_OR_RAISE(
-       auto unordered, ScanBatchesUnorderedAsync(cpu_executor, /*sequence_fragments=*/true,
-                                                 /*use_legacy_batching=*/true));
-@@ -775,7 +781,7 @@ Future<int64_t> AsyncScanner::CountRowsAsync(Executor* executor) {
+@@ -778,7 +780,7 @@ Future<int64_t> AsyncScanner::CountRowsAsync(Executor* executor) {
  }
  
  Future<int64_t> AsyncScanner::CountRowsAsync() {
@@ -121,24 +181,8 @@ index 18981d1451..cdf5f586b4 100644
  }
  
  Result<int64_t> AsyncScanner::CountRows() {
-@@ -999,6 +1005,7 @@ Result<acero::ExecNode*> MakeScanNode(acero::ExecPlan* plan,
-   ARROW_ASSIGN_OR_RAISE(auto fragments_vec, fragments_it.ToVector());
-   auto fragment_gen = MakeVectorGenerator(std::move(fragments_vec));
- 
-+  // This is the call site.
-   ARROW_ASSIGN_OR_RAISE(auto batch_gen_gen,
-                         FragmentsToBatches(std::move(fragment_gen), scan_options));
- 
-@@ -1168,6 +1175,7 @@ Result<acero::ExecNode*> MakeOrderedSinkNode(acero::ExecPlan* plan,
- 
- namespace internal {
- void InitializeScanner(arrow::acero::ExecFactoryRegistry* registry) {
-+  // This is where it's registered.
-   DCHECK_OK(registry->AddFactory("scan", MakeScanNode));
-   DCHECK_OK(registry->AddFactory("ordered_sink", MakeOrderedSinkNode));
-   DCHECK_OK(registry->AddFactory("augmented_project", MakeAugmentedProjectNode));
 diff --git a/cpp/src/arrow/dataset/scanner.h b/cpp/src/arrow/dataset/scanner.h
-index 4479158ff2..301cdc0517 100644
+index d2de267897..1c605c1bf2 100644
 --- a/cpp/src/arrow/dataset/scanner.h
 +++ b/cpp/src/arrow/dataset/scanner.h
 @@ -107,6 +107,11 @@ struct ARROW_DS_EXPORT ScanOptions {
@@ -153,7 +197,7 @@ index 4479158ff2..301cdc0517 100644
    /// If true the scanner will scan in parallel
    ///
    /// Note: If true, this will use threads from both the cpu_executor and the
-@@ -437,6 +442,11 @@ class ARROW_DS_EXPORT Scanner {
+@@ -442,6 +447,11 @@ class ARROW_DS_EXPORT Scanner {
        TaggedRecordBatchIterator scan);
  
    const std::shared_ptr<ScanOptions> scan_options_;
@@ -216,39 +260,3 @@ index 44b1e227b0..218edc60ca 100644
  }
  
  }  // namespace internal
-diff --git a/cpp/src/parquet/arrow/reader.cc b/cpp/src/parquet/arrow/reader.cc
-index d6ad7c25bc..5ade5bb747 100644
---- a/cpp/src/parquet/arrow/reader.cc
-+++ b/cpp/src/parquet/arrow/reader.cc
-@@ -1153,6 +1153,7 @@ class RowGroupGenerator {
-       const int row_group, const std::vector<int>& column_indices) {
-     // Skips bound checks/pre-buffering, since we've done that already
-     const int64_t batch_size = self->properties().batch_size();
-+    // This the main location.
-     return self->DecodeRowGroups(self, {row_group}, column_indices, cpu_executor)
-         .Then([batch_size](const std::shared_ptr<Table>& table)
-                   -> ::arrow::Result<RecordBatchGenerator> {
-@@ -1190,6 +1191,7 @@ FileReaderImpl::GetRecordBatchGenerator(std::shared_ptr<FileReader> reader,
-                        reader_properties_.cache_options());
-     END_PARQUET_CATCH_EXCEPTIONS
-   }
-+  // This is where it's created it seems.
-   ::arrow::AsyncGenerator<RowGroupGenerator::RecordBatchGenerator> row_group_generator =
-       RowGroupGenerator(::arrow::internal::checked_pointer_cast<FileReaderImpl>(reader),
-                         cpu_executor, row_group_indices, column_indices,
-@@ -1228,6 +1230,7 @@ Status FileReaderImpl::ReadRowGroups(const std::vector<int>& row_groups,
-     END_PARQUET_CATCH_EXCEPTIONS
-   }
- 
-+  // This is another call site (might not be called by our use case).
-   auto fut = DecodeRowGroups(/*self=*/nullptr, row_groups, column_indices,
-                              /*cpu_executor=*/nullptr);
-   ARROW_ASSIGN_OR_RAISE(*out, fut.MoveResult());
-@@ -1249,6 +1252,7 @@ Future<std::shared_ptr<Table>> FileReaderImpl::DecodeRowGroups(
-                                               std::shared_ptr<ColumnReaderImpl> reader)
-       -> ::arrow::Result<std::shared_ptr<::arrow::ChunkedArray>> {
-     std::shared_ptr<::arrow::ChunkedArray> column;
-+    // This is the most likely place for invocation.
-     RETURN_NOT_OK(ReadColumn(static_cast<int>(i), row_groups, reader.get(), &column));
-     return column;
-   };
