@@ -8,7 +8,7 @@ jobs:
     vmImage: ubuntu-latest
   strategy:
     matrix:
-      linux_64_c_compiler_verson13cuda_compilerNonecuda_compiler_versionNonecxx_compiler_version13:
+      linux_64_c_compiler_version13cuda_compilerNonecuda_compiler_versionNonecxx_compiler_version13:
         CONFIG: linux_64_c_compiler_version13cuda_compilerNonecuda_compiler_versionNonecxx_compiler_version13
         UPLOAD_PACKAGES: 'True'
         DOCKER_IMAGE: quay.io/condaforge/linux-anvil-cos7-x86_64
