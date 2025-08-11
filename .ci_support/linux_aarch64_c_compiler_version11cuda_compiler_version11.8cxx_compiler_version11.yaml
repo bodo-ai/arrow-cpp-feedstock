@@ -1,13 +1,13 @@
 aws_crt_cpp:
-- 0.32.10
+- 0.33.1
 aws_sdk_cpp:
-- 1.11.510
+- 1.11.606
 azure_core_cpp:
-- 1.14.0
+- 1.16.0
 azure_identity_cpp:
-- 1.10.0
+- 1.12.0
 azure_storage_blobs_cpp:
-- 12.13.0
+- 12.14.0
 azure_storage_files_datalake_cpp:
 - 12.12.0
 bzip2:
@@ -43,21 +43,21 @@ gflags:
 glog:
 - '0.7'
 libabseil:
-- '20250127'
+- '20250512'
 libarrow:
 - '*'
 libboost_devel:
-- '1.86'
+- '1.88'
 libgoogle_cloud_devel:
-- '2.36'
+- '2.39'
 libgoogle_cloud_storage_devel:
-- '2.36'
+- '2.39'
 libgrpc:
-- '1.71'
+- '1.73'
 libopentelemetry_cpp:
 - '1.21'
 libprotobuf:
-- 5.29.3
+- 6.31.1
 libutf8proc:
 - '2.10'
 lz4_c:
@@ -65,7 +65,7 @@ lz4_c:
 openssl:
 - '3'
 orc:
-- 2.1.2
+- 2.2.0
 re2:
 - 2024.07.02
 snappy:
@@ -73,7 +73,7 @@ snappy:
 target_platform:
 - linux-aarch64
 thrift_cpp:
-- 0.21.0
+- 0.22.0
 zip_keys:
 - - c_compiler_version
   - cxx_compiler_version

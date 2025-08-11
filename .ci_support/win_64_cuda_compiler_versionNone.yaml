@@ -1,7 +1,7 @@
 aws_crt_cpp:
-- 0.32.10
+- 0.33.1
 aws_sdk_cpp:
-- 1.11.510
+- 1.11.606
 bzip2:
 - '1'
 c_compiler:
@@ -25,23 +25,23 @@ gflags:
 glog:
 - '0.7'
 libabseil:
-- '20250127'
+- '20250512'
 libarrow:
 - '*'
 libboost_devel:
-- '1.86'
+- '1.88'
 libcrc32c:
 - '1.1'
 libcurl:
 - '8'
 libgoogle_cloud_devel:
-- '2.36'
+- '2.39'
 libgoogle_cloud_storage_devel:
-- '2.36'
+- '2.39'
 libgrpc:
-- '1.71'
+- '1.73'
 libprotobuf:
-- 5.29.3
+- 6.31.1
 libutf8proc:
 - '2.10'
 lz4_c:
@@ -49,7 +49,7 @@ lz4_c:
 openssl:
 - '3'
 orc:
-- 2.1.2
+- 2.2.0
 re2:
 - 2024.07.02
 snappy:
@@ -57,7 +57,7 @@ snappy:
 target_platform:
 - win-64
 thrift_cpp:
-- 0.21.0
+- 0.22.0
 zip_keys:
 - - cuda_compiler_version
   - cuda_compiler
