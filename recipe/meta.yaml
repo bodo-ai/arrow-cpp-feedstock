@@ -23,7 +23,7 @@ source:
       # https://github.com/apache/arrow/issues/35587
       - patches/0002-skip-NonExistentBucket-test-on-osx.patch
       # Bodo-specific Changes
-      - patches/0004-Bodo-Changes.patch
+      - patches/0003-Bodo-Changes.patch
   # testing-submodules not part of release tarball
   - git_url: https://github.com/apache/arrow-testing.git
     git_rev: fbf6b703dc93d17d75fa3664c5aa2c7873ebaf06
@@ -33,7 +33,7 @@ source:
     folder: cpp/submodules/parquet-testing
 
 build:
-  number: 6
+  number: 0
   # for cuda support, building with one version is enough to be compatible with
   # all later versions, since arrow is only using libcuda, and not libcudart.
   skip: true  # [cuda_compiler_version not in ("None", cuda_compiler_version_min)]
